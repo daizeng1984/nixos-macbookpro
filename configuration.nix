@@ -2,124 +2,85 @@
 # your system.  Help is available in the configuration.nix(5) man page
 # and in the NixOS manual (accessible by running ‘nixos-help’).
 
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 {
+  nixpkgs.config.allowUnfree = true;
+
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
     ];
 
-  # Use the systemd-boot EFI boot loader.
+#   boot.loader.grub = {
+#     enable = true;
+#     version = 2;
+#     device = "nodev";
+#     efisupport = true;
+#     useOSProber = true;
+#   };
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
+
   boot.kernelPatches = [
     { name = "poweroff-fix"; patch = ./patches/kernel/poweroff-fix.patch; }
     { name = "hid-apple-keyboard"; patch = ./patches/kernel/hid-apple-keyboard.patch; }
   ];
-  boot.initrd.luks.devices = [ {
-    name = "pv-enc";
-    device = "/dev/sda2";
-    preLVM = true;
-    allowDiscards = true;
-  } ];
-  boot.initrd.kernelModules = [
-    "dm_snapshot"
-  ];
-  boot.cleanTmpDir = true;
   boot.kernelParams = [
     "hid_apple.fnmode=2"
+    "hid_apple.iso_layout=0"
+    "hid_apple.swap_opt_cmd=1"
     "hid_apple.swap_fn_leftctrl=1"
+    "acpi_osi="
   ];
-  boot.extraModprobeConfig = ''
-    options snd_hda_intel index=0 model=intel-mac-auto id=PCM
-    options snd_hda_intel index=1 model=intel-mac-auto id=HDMI
-    options snd_hda_intel model=mbp101
-  '';
 
-  fileSystems."/".options = [ "noatime" "nodiratime" "discard" ];
+  networking.hostName = "mac-nixos"; # Define your hostname.
+  # networking.wireless.enable = true;  # Enables wireless support via wpa_supplicant.
 
-  fileSystems."/home".options = [ "noatime" "nodiratime" "discard" ];
+  # Set your time zone.
+  time.timeZone = "America/Los_Angeles";
 
-  i18n = {
-    consoleFont = "Lat2-Terminus16";
-    consoleKeyMap = "fr";
-    defaultLocale = "en_US.UTF-8";
+  # The global useDHCP flag is deprecated, therefore explicitly set to false here.
+  # Per-interface useDHCP will be mandatory in the future, so this generated config
+  # replicates the default behaviour.
+  networking.useDHCP = false;
+
+  # Configure network proxy if necessary
+  # networking.proxy.default = "http://user:password@proxy:port/";
+  # networking.proxy.noProxy = "127.0.0.1,localhost,internal.domain";
+
+  # Select internationalisation properties.
+  i18n.defaultLocale = "en_US.UTF-8";
+  i18n.inputMethod = {
+    enabled = "ibus";
+    ibus.engines = with pkgs.ibus-engines; [ rime ];
+  };
+  console = {
+    font = "Lat2-Terminus16";
+    keyMap = "us";
   };
 
-  time.timeZone = "Europe/Paris";
+  # Intel driver
+  boot.initrd.kernelModules = [ "i915" ];
+  services.xserver.videoDrivers = [ "intel" ];
+  hardware.cpu.intel.updateMicrocode =
+    lib.mkDefault config.hardware.enableRedistributableFirmware;
 
-  fonts.enableFontDir = true;
-  fonts.enableDefaultFonts = true;
-  fonts.enableCoreFonts = true;
-  fonts.enableGhostscriptFonts = true;
-  fonts.fonts = with pkgs; [
-    corefonts
-    dejavu_fonts
-    font-awesome-ttf
-    inconsolata
-    liberation_ttf
-    terminus_font
-    ubuntu_font_family
-    unifont
+  hardware.opengl.extraPackages = with pkgs; [
+    vaapiIntel
+    vaapiVdpau
+    libvdpau-va-gl
+    intel-media-driver
   ];
 
-  nix.useSandbox = true;
-  nix.binaryCaches = [
-    http://cache.nixos.org
-  ];
-
-  networking.hostName = "nixbook";
-  networking.firewall.enable = true;
-  networking.networkmanager.enable = true;
-
-  hardware.bluetooth.enable = false;
-  hardware.facetimehd.enable = true;
-  hardware.pulseaudio.enable = true;
-  hardware.opengl.extraPackages = [ pkgs.vaapiIntel ];
-
-  environment.variables = {
-    #MY_ENV_VAR = "\${HOME}/bla";
+  # PC
+  services.tlp.enable = lib.mkDefault true;
+  boot.kernel.sysctl = {
+    "vm.swappiness" = lib.mkDefault 1;
   };
-
-  environment.systemPackages = with pkgs; [
-    acpi
-    bash
-    curl
-    customGit
-    htop
-    idea.idea-ultimate
-    lm_sensors
-    oh-my-zsh
-    terminator
-    vim
-    vscode
-    wget
-    zip unzip
-    # i3
-    pythonPackages.py3status
-    dmenu
-    rofi
-    networkmanagerapplet
-    xorg.xbacklight
-  ];
-
-  nixpkgs.config = {
-    allowUnfree = true;
-    packageOverrides = pkgs: {
-      customGit = pkgs.git.override {
-        guiSupport = true;
-        svnSupport = true;
-      };
-    };
-  };
+  services.fstrim.enable = lib.mkDefault true;
 
   powerManagement.enable = true;
-
-  programs.vim.defaultEditor = true;
-
-  programs.light.enable = true;
-
   services.mbpfan = {
     enable = true;
     lowTemp = 61;
@@ -127,73 +88,71 @@
     maxTemp = 84;
   };
 
-  services.openssh.enable = true;
+  # Enable the GNOME 3 Desktop Environment.
+  services.xserver.enable = true;
+  services.xserver.displayManager.gdm.enable = true;
+  services.xserver.displayManager.gdm.wayland = false;
+  services.xserver.desktopManager.gnome3.enable = true;
+  # services.xserver.displayManager.sddm.enable = true;
+  # services.xserver.desktopManager.plasma5.enable = true;
 
-  services.locate.enable = true;
+  # Configure keymap in X11
+  services.xserver.layout = "us";
+  services.xserver.xkbOptions = "caps:none";
 
   # Enable CUPS to print documents.
-  # services.printing.enable = true;
+  services.printing.enable = true;
 
-  services.xserver.enable = true;
-  services.xserver.enableTCP = false;
-  services.xserver.layout = "fr";
-  services.xserver.xkbOptions = "eurosign:e, terminate:ctrl_alt_bksp, ctrl:nocaps";
-  services.xserver.dpi = 150;
+  # Enable sound.
+  sound.enable = true;
+  hardware.pulseaudio.enable = true;
 
-  services.xserver.multitouch.enable = true;
+  # Facetime
+  hardware.facetimehd.enable = true;
 
-  services.xserver.synaptics.enable = true;
-  services.xserver.synaptics.dev = "/dev/input/event7";
-  services.xserver.synaptics.tapButtons = false;
-  services.xserver.synaptics.buttonsMap = [ 1 3 2 ];
-  services.xserver.synaptics.twoFingerScroll = true;
-  services.xserver.synaptics.palmDetect = false;
-  services.xserver.synaptics.accelFactor = "0.001";
-  services.xserver.synaptics.additionalOptions = ''
-    Option "SHMConfig" "on"
-    Option "VertScrollDelta" "-100"
-    Option "HorizScrollDelta" "-100"
-    Option "Resolution" "370"
-  '';
-  services.xserver.windowManager.i3.enable = true;
+  # Enable touchpad support (enabled default in most desktopManager).
+  services.xserver.libinput.enable = true;
 
-  security.sudo.enable = true;
-  security.sudo.wheelNeedsPassword = true;
-
-  users.defaultUserShell = pkgs.zsh;
-  users.extraUsers.jeremie = {
+  # Define a user account. Don't forget to set a password with ‘passwd’.
+  users.users.zdai = {
     isNormalUser = true;
-    uid = 1000;
-    group = "users";
-    extraGroups = [
-      "wheel"
-      "docker"
-      "networkmanager"
-      "messagebus"
-      "systemd-journal"
-      "disk"
-      "audio"
-      "video"
-    ];
-    createHome = true;
-    home = "/home/jeremie";
+    extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
   };
 
-  programs.zsh.enable = true;
-  programs.zsh.enableCompletion = true;
-  programs.zsh.enableSyntaxHighlighting = true;    
-  programs.zsh.interactiveShellInit = ''
-    export ZSH=${pkgs.oh-my-zsh}/share/oh-my-zsh/
+  # List packages installed in system profile. To search, run:
+  # $ nix search wget
+  environment.systemPackages = with pkgs; [
+    wget
+    vim
+    firefox
+  ];
 
-    # Customize your oh-my-zsh options here
-    ZSH_THEME="agnoster"
-    plugins=(git)
+  # Some programs need SUID wrappers, can be configured further or are
+  # started in user sessions.
+  # programs.mtr.enable = true;
+  programs.gnupg.agent = {
+    enable = true;
+    enableSSHSupport = true;
+  };
 
-    source $ZSH/oh-my-zsh.sh
-  '';
+  # List services that you want to enable:
 
-  system.stateVersion = "17.03";
+  # Enable the OpenSSH daemon.
+  # services.openssh.enable = true;
 
-  virtualisation.docker.enable = true;
-  virtualisation.docker.enableOnBoot = true;
+  # Open ports in the firewall.
+  # networking.firewall.allowedTCPPorts = [ ... ];
+  # networking.firewall.allowedUDPPorts = [ ... ];
+  # Or disable the firewall altogether.
+  # networking.firewall.enable = false;
+
+  # This value determines the NixOS release from which the default
+  # settings for stateful data, like file locations and database versions
+  # on your system were taken. It‘s perfectly fine and recommended to leave
+  # this value at the release version of the first install of this system.
+  # Before changing this value read the documentation for this option
+  # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
+  system.stateVersion = "20.09"; # Did you read the comment?
+
 }
+
