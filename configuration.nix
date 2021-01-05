@@ -74,13 +74,33 @@
   ];
 
   # PC
-  services.tlp.enable = lib.mkDefault true;
   boot.kernel.sysctl = {
     "vm.swappiness" = lib.mkDefault 1;
   };
   services.fstrim.enable = lib.mkDefault true;
 
+  services.tlp = {
+    enable = true;
+    settings = {
+      CPU_SCALING_GOVERNOR_ON_BAT="powersave";
+      CPU_SCALING_GOVERNOR_ON_AC="powersave";
+
+      # The following prevents the battery from charging fully to
+      # preserve lifetime. Run `tlp fullcharge` to temporarily force
+      # full charge.
+      # https://linrunner.de/tlp/faq/battery.html#how-to-choose-good-battery-charge-thresholds
+      START_CHARGE_THRESH_BAT0=40;
+      STOP_CHARGE_THRESH_BAT0=50;
+
+      # 100 being the maximum, limit the speed of my CPU to reduce
+      # heat and increase battery usage:
+      CPU_MAX_PERF_ON_AC=95;
+      CPU_MAX_PERF_ON_BAT=50;
+    };
+  };
+
   powerManagement.enable = true;
+  powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
   services.mbpfan = {
     enable = true;
     lowTemp = 61;
@@ -100,12 +120,40 @@
   services.xserver.layout = "us";
   services.xserver.xkbOptions = "caps:none";
 
+  # Suspend when battery low 
+  systemd.timers.suspend-on-low-battery = {
+    wantedBy = [ "multi-user.target" ];
+    timerConfig = {
+      OnUnitActiveSec = "120";
+      OnBootSec= "120";
+    };
+  };
+  systemd.services.suspend-on-low-battery =
+    let
+      battery-level-sufficient = pkgs.writeShellScriptBin
+      "battery-level-sufficient" ''
+        test "$(cat /sys/class/power_supply/BAT1/status)" != Discharging \
+          || test "$(cat /sys/class/power_supply/BAT1/capacity)" -ge 3
+      '';
+    in
+    {
+      serviceConfig = { Type = "oneshot"; };
+      onFailure = [ "suspend.target" ];
+      script = "${battery-level-sufficient}/bin/battery-level-sufficient";
+      };
+
+
   # Enable CUPS to print documents.
   services.printing.enable = true;
 
   # Enable sound.
   sound.enable = true;
   hardware.pulseaudio.enable = true;
+  hardware.pulseaudio.support32Bit = true;
+
+  # logitech
+  hardware.logitech.wireless.enable = true;
+  hardware.logitech.wireless.enableGraphical = true; # for solaar to be included
 
   # Facetime
   hardware.facetimehd.enable = true;
